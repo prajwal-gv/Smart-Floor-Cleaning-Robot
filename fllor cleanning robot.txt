@@ -1,0 +1,155 @@
+#define BLYNK_PRINT Serial
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+
+// WiFi & Blynk
+char auth[] = "YOUR_AUTH_TOKEN";
+char ssid[] = "YOUR_SSID";
+char pass[] = "YOUR_PASSWORD";
+
+// Ultrasonic Sensors
+#define trigLeft D5
+#define echoLeft D6
+#define trigRight D7
+#define echoRight D8
+
+// Motors
+#define motor1Pin1 D1
+#define motor1Pin2 D2
+#define motor2Pin1 D3
+#define motor2Pin2 D4
+
+// Cleaning System
+#define waterPumpPin D0
+#define brushMotorPin D9
+
+// Settings
+const int threshold = 15;
+const int turnDelay = 400;
+const int backDelay = 600;
+const unsigned long cleanDelay = 2000;
+
+unsigned long moveStartTime = 0;
+bool cleaningStarted = false;
+bool autoMode = true; // Start cleaning on boot
+int distLeft, distRight;
+
+// Manual Blynk Controls
+bool manualPump = false;
+bool manualBrush = false;
+
+BLYNK_WRITE(V0) {
+  autoMode = param.asInt();
+  if (!autoMode) {
+    stopAll();
+  }
+}
+
+BLYNK_WRITE(V1) {
+  manualPump = param.asInt();
+  digitalWrite(waterPumpPin, manualPump);
+}
+
+BLYNK_WRITE(V2) {
+  manualBrush = param.asInt();
+  digitalWrite(brushMotorPin, manualBrush);
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  // Setup pins
+  pinMode(trigLeft, OUTPUT);  pinMode(echoLeft, INPUT);
+  pinMode(trigRight, OUTPUT); pinMode(echoRight, INPUT);
+
+  pinMode(motor1Pin1, OUTPUT); pinMode(motor1Pin2, OUTPUT);
+  pinMode(motor2Pin1, OUTPUT); pinMode(motor2Pin2, OUTPUT);
+
+  pinMode(waterPumpPin, OUTPUT); pinMode(brushMotorPin, OUTPUT);
+
+  stopAll();
+
+  // Start Blynk
+  Blynk.begin(auth, ssid, pass);
+}
+
+void loop() {
+  Blynk.run();
+
+  if (!autoMode) return; // Manual mode
+
+  distLeft = getDistance(trigLeft, echoLeft);
+  distRight = getDistance(trigRight, echoRight);
+
+  Serial.print("L: "); Serial.print(distLeft);
+  Serial.print(" | R: "); Serial.println(distRight);
+
+  if (distLeft < threshold && distRight < threshold) {
+    stopAll();
+    moveBackward();
+    delay(backDelay);
+    moveStartTime = 0;
+    cleaningStarted = false;
+  } else if (distLeft < threshold) {
+    stopAll();
+    turnRight();
+    delay(turnDelay);
+    moveStartTime = 0;
+    cleaningStarted = false;
+  } else if (distRight < threshold) {
+    stopAll();
+    turnLeft();
+    delay(turnDelay);
+    moveStartTime = 0;
+    cleaningStarted = false;
+  } else {
+    moveForward();
+    if (moveStartTime == 0) moveStartTime = millis();
+
+    if (!cleaningStarted && millis() - moveStartTime >= cleanDelay) {
+      digitalWrite(waterPumpPin, HIGH);
+      digitalWrite(brushMotorPin, HIGH);
+      cleaningStarted = true;
+    }
+  }
+
+  delay(100);
+}
+
+int getDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW); delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH); delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH, 30000);
+  return duration * 0.034 / 2;
+}
+
+void moveForward() {
+  digitalWrite(motor1Pin1, HIGH); digitalWrite(motor1Pin2, LOW);
+  digitalWrite(motor2Pin1, HIGH); digitalWrite(motor2Pin2, LOW);
+}
+
+void moveBackward() {
+  digitalWrite(motor1Pin1, LOW); digitalWrite(motor1Pin2, HIGH);
+  digitalWrite(motor2Pin1, LOW); digitalWrite(motor2Pin2, HIGH);
+  digitalWrite(waterPumpPin, LOW);
+  digitalWrite(brushMotorPin, LOW);
+}
+
+void turnLeft() {
+  digitalWrite(motor1Pin1, LOW); digitalWrite(motor1Pin2, HIGH);
+  digitalWrite(motor2Pin1, HIGH); digitalWrite(motor2Pin2, LOW);
+  digitalWrite(waterPumpPin, LOW); digitalWrite(brushMotorPin, LOW);
+}
+
+void turnRight() {
+  digitalWrite(motor1Pin1, HIGH); digitalWrite(motor1Pin2, LOW);
+  digitalWrite(motor2Pin1, LOW); digitalWrite(motor2Pin2, HIGH);
+  digitalWrite(waterPumpPin, LOW); digitalWrite(brushMotorPin, LOW);
+}
+
+void stopAll() {
+  digitalWrite(motor1Pin1, LOW); digitalWrite(motor1Pin2, LOW);
+  digitalWrite(motor2Pin1, LOW); digitalWrite(motor2Pin2, LOW);
+  digitalWrite(waterPumpPin, LOW); digitalWrite(brushMotorPin, LOW);
+}
